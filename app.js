@@ -7,8 +7,11 @@ const ejs = require("ejs");
 const _ = require("lodash");
 const mongoose = require("mongoose");
 
-const bcrypt=require("bcrypt");
-const saltRounds=10;
+const session=require("express-session");
+const passport=require("passport");
+const passportLocalMongoose=require("passport-local-mongoose");
+// const bcrypt=require("bcrypt");
+// const saltRounds=10;
 
 // const md5 = require("md5");
 // const encrypt = require("mongoose-encryption");
@@ -24,13 +27,26 @@ app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({
   extended: true
 }));
+//THIS PLACE IS FIXED
+//INTILAZATION 
+
+app.use(session({
+  secret:"Our little secret.",
+  resave:false,
+  saveUninitialized:false
+}));
+
+//INTIALISING PAASPORT
+app.use(passport.initialize());
+app.use(passport.session());
+
+
 
 //database connect
 mongoose.connect("mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+1.6.2",{
   dbName: 'UserDB',
 },{useNewUrlParser:true},).then(()=>console.log('connect database'))
 .catch((err)=>{console.log(err);});
-
 
 
 //shema new mongoose is written here to give the thing that are important for special database
@@ -46,9 +62,17 @@ const userSchema= new mongoose.Schema({
 // userSchema.plugin(encrypt,{secret: process.env.SECRET, encryptedFields:["password"]});
 
 
+//PLUGIN MONGOSCHEMA
+userSchema.plugin(passportLocalMongoose);
+// userSchema.plugin(findOrCreate);
+
 
 const User = new mongoose.model("User",userSchema);
 
+// yeh sayad ham session ko exprire karne ke liye use kartay h
+passport.use(User.createStrategy());
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 
 
@@ -90,61 +114,64 @@ app.get("/register",function(req,res)
 // });
 
 
+app.get("/secrets" , function (req,res)
+{
+  if(req.isAuthenticated())
+  {
+    res.render("secrets");
+  }else{
+    res.redirect("/login");
+  }
+});
 
-
-
-
-
+app.get("/logout",function(req,res){
+ req.logout(function(err){
+  if(err)
+  {
+    console.log(err);
+  }else{
+    res.redirect("/");
+  }
+ });
+//  res.redirect('/'); 
+});
 
 app.post("/register",function(req,res)
 {
-
-  bcrypt.hash(req.body.password,saltRounds , function(err,hash)
-  {
-    const newUser = new User({
-      email: req.body.username,
-      password: hash
-  });
-  newUser.save()
-  .then(() => {
-    res.render("secrets");
-  })
-  .catch((err) => {
-    console.log(err);
-  });
-   
-  });
+  User.register({username:req.body.username}, req.body.password, function(err, user) {
+    if(err)
+     {
+      console.log(err);
+      res.redirect("/register");
+    }
+    else
+    { 
+    User.authenticate("local")(req ,res ,function() {
+      res.redirect("/secrets");
+      });
+    } 
+});
 });
 
 app.post("/login" ,function(req,res)
 {
-const username=req.body.username;
-const password= req.body.password;
-console.log(password);
+const user = new User({
+  username:req.body.username,
+  password:req.body.password
+});
 
-//to find email in the database wherether its present or not
-User.findOne({ email: username })
-  .then(foundUser => {
-    if (foundUser) {
-      bcrypt.compare(req.body.password,foundUser.password , function(err,result)
-      {
-        if(result==true)
-        {
-          console.log("found");
-          res.render("secrets");
-        }else
-        {
-          console.log("not");
-        }
-      });
-      
-    }else{
-      console.log("not found");
-    }
-  })
-  .catch(err => {
+req.login(user,function(err)
+{
+  if(err)
+  {
     console.log(err);
-  });
+  }else{
+    passport.authenticate("local")(req,res,function()
+    {
+      res.redirect("/secrets");
+    });
+  }
+});
 
 });
 
@@ -154,9 +181,10 @@ User.findOne({ email: username })
 
 
 
-
-
-
+// app.get("/logout", function(req, res){
+//   req.logout();
+//   res.redirect("/");
+// });
 
 
 
@@ -165,4 +193,4 @@ User.findOne({ email: username })
 app.listen(2000,function()
 {
 console.log("Successfully run at 2000");
-})  
+}) 
